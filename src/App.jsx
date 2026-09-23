@@ -163,39 +163,4 @@ export default function App() {
 
                             {addingSubtaskFor === task.id && (
                               <form className="row inline-add" onSubmit={(e) => { e.preventDefault(); addSubtask(task.id) }}>
-                                <input autoFocus value={draftTitle} onChange={e => setDraftTitle(e.target.value)} placeholder="Subtask title" />
-                                <button type="submit">Add</button>
-                                <button type="button" className="ghost" onClick={() => setAddingSubtaskFor(null)}>Cancel</button>
-                              </form>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-
-                  {addingTaskFor === project.id && (
-                    <form className="row inline-add" onSubmit={(e) => { e.preventDefault(); addTask(project.id) }}>
-                      <input autoFocus value={draftTitle} onChange={e => setDraftTitle(e.target.value)} placeholder="Task title" />
-                      <button type="submit">Add</button>
-                      <button type="button" className="ghost" onClick={() => setAddingTaskFor(null)}>Cancel</button>
-                    </form>
-                  )}
-                </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
-
-      <form className="new-project" onSubmit={addProject}>
-        <input
-          value={newProjectTitle}
-          onChange={e => setNewProjectTitle(e.target.value)}
-          placeholder="New project name…"
-        />
-        <button type="submit">+ New project</button>
-      </form>
-    </div>
-  )
-}
+                                <input autoFocus value={draftTitle} onChange={e => setDraftTitle(e.target.value)}
