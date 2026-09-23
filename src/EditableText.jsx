@@ -38,8 +38,9 @@ export default function EditableText({ value, onSave, className = '' }) {
   }
 
   return (
-    <span className={className} onClick={startEdit} title="Click to rename">
-      {value}
+    <span className="editable-wrap">
+      <span className={className}>{value}</span>
+      <button type="button" className="edit-icon-btn" title="Rename" onClick={startEdit}>✎</button>
     </span>
   )
 }

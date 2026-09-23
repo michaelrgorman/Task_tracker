@@ -33,6 +33,7 @@ export default function App() {
 
   const [view, setView] = useState('home') // 'home' | 'detail' | 'recurring'
   const [selectedTaskId, setSelectedTaskId] = useState(null)
+  const [hideCompleted, setHideCompleted] = useState(false)
 
   const rowRefs = useRef(new Map())
   const [dragInfo, setDragInfo] = useState(null) // { projectId, order: [taskId...], draggingId }
@@ -131,10 +132,10 @@ export default function App() {
 
   function tasksForProject(projectId) {
     const base = tasks.filter(t => t.project_id === projectId)
-    if (dragInfo && dragInfo.projectId === projectId) {
-      return dragInfo.order.map(id => base.find(t => t.id === id)).filter(Boolean)
-    }
-    return base
+    const ordered = (dragInfo && dragInfo.projectId === projectId)
+      ? dragInfo.order.map(id => base.find(t => t.id === id)).filter(Boolean)
+      : base
+    return hideCompleted ? ordered.filter(t => !t.completed) : ordered
   }
 
   async function addProject(e) {
@@ -326,7 +327,12 @@ export default function App() {
             <h1>Nestlist</h1>
             <p className="tagline">a place for everything nested</p>
           </div>
-          <button className="nav-btn" onClick={() => setView('recurring')}>↻ Recurring</button>
+          <div className="nav-actions">
+            <button className="nav-btn" onClick={() => setHideCompleted(h => !h)}>
+              {hideCompleted ? '☑ Show completed' : '☐ Hide completed'}
+            </button>
+            <button className="nav-btn" onClick={() => setView('recurring')}>↻ Recurring</button>
+          </div>
         </div>
       </header>
 
