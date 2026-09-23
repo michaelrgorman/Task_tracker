@@ -13,6 +13,8 @@ function useToggleSet() {
   return [set, toggle]
 }
 
+const PALETTE = ['#FF6B6B', '#4ECDC4', '#FFB84C', '#A78BFA', '#FF8FAB', '#4D96FF', '#6BCB77', '#F76E11']
+
 export default function App() {
   const [projects, setProjects] = useState([])
   const [tasks, setTasks] = useState([])
@@ -116,18 +118,22 @@ export default function App() {
           <p className="empty">No projects yet — start one below.</p>
         )}
 
-        {projects.map(project => {
+        {projects.map((project, projectIndex) => {
           const projectTasks = tasks.filter(t => t.project_id === project.id)
           const isOpen = openProjects.has(project.id)
+          const color = PALETTE[projectIndex % PALETTE.length]
           return (
-            <div className="row-group" key={project.id}>
+            <div className="row-group" key={project.id} style={{ '--proj-color': color }}>
               <div className="row row-project">
+                <span className="proj-dot" />
                 <button className="disclosure" onClick={() => toggleProject(project.id)}>
                   {isOpen ? '▾' : '▸'}
                 </button>
                 <span className="title project-title">{project.title}</span>
-                <button className="ghost" onClick={() => { setAddingTaskFor(project.id); setDraftTitle('') }}>+ task</button>
-                <button className="ghost danger" onClick={() => deleteProject(project.id)}>delete</button>
+                <div className="row-actions">
+                  <button className="icon-btn" title="Add task" onClick={() => { setAddingTaskFor(project.id); setDraftTitle(''); if (!openProjects.has(project.id)) toggleProject(project.id) }}>＋</button>
+                  <button className="icon-btn danger" title="Delete project" onClick={() => deleteProject(project.id)}>×</button>
+                </div>
               </div>
 
               {isOpen && (
@@ -138,15 +144,17 @@ export default function App() {
                     return (
                       <div className="row-group" key={task.id}>
                         <div className="row row-task">
-                          <button className="disclosure" onClick={() => toggleTask(task.id)}>
-                            {taskOpen ? '▾' : '▸'}
-                          </button>
                           <label className="check">
                             <input type="checkbox" checked={task.completed} onChange={() => toggleTaskDone(task)} />
                           </label>
+                          <button className="disclosure" onClick={() => toggleTask(task.id)}>
+                            {taskOpen ? '▾' : '▸'}
+                          </button>
                           <span className={`title leader ${task.completed ? 'done' : ''}`}>{task.title}</span>
-                          <button className="ghost" onClick={() => { setAddingSubtaskFor(task.id); setDraftTitle('') }}>+ sub</button>
-                          <button className="ghost danger" onClick={() => deleteTask(task.id)}>delete</button>
+                          <div className="row-actions">
+                            <button className="icon-btn" title="Add subtask" onClick={() => { setAddingSubtaskFor(task.id); setDraftTitle(''); if (!openTasks.has(task.id)) toggleTask(task.id) }}>＋</button>
+                            <button className="icon-btn danger" title="Delete task" onClick={() => deleteTask(task.id)}>×</button>
+                          </div>
                         </div>
 
                         {taskOpen && (
@@ -157,7 +165,9 @@ export default function App() {
                                   <input type="checkbox" checked={sub.completed} onChange={() => toggleSubtaskDone(sub)} />
                                 </label>
                                 <span className={`title leader ${sub.completed ? 'done' : ''}`}>{sub.title}</span>
-                                <button className="ghost danger" onClick={() => deleteSubtask(sub.id)}>delete</button>
+                                <div className="row-actions">
+                                  <button className="icon-btn danger" title="Delete subtask" onClick={() => deleteSubtask(sub.id)}>×</button>
+                                </div>
                               </div>
                             ))}
 
