@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabaseClient } from './supabaseClient'
 import TaskDetail from './TaskDetail'
+import RecurringRules from './RecurringRules'
+import EditableText from './EditableText'
 import { PRIORITIES } from './constants'
 
 function useToggleSet() {
@@ -21,6 +23,7 @@ export default function App() {
   const [projects, setProjects] = useState([])
   const [tasks, setTasks] = useState([])
   const [subtasks, setSubtasks] = useState([])
+  const [recurringRules, setRecurringRules] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [openProjects, toggleProject] = useToggleSet()
@@ -28,30 +31,102 @@ export default function App() {
   const [addingTaskFor, setAddingTaskFor] = useState(null)
   const [draftTitle, setDraftTitle] = useState('')
 
-  const [view, setView] = useState('home') // 'home' | 'detail'
+  const [view, setView] = useState('home') // 'home' | 'detail' | 'recurring'
   const [selectedTaskId, setSelectedTaskId] = useState(null)
 
   const rowRefs = useRef(new Map())
   const [dragInfo, setDragInfo] = useState(null) // { projectId, order: [taskId...], draggingId }
 
-  useEffect(() => { loadAll() }, [])
+  useEffect(() => { initialize() }, [])
+
+  async function initialize() {
+    setLoading(true)
+    await generateDueTasks()
+    await loadAll()
+  }
 
   async function loadAll() {
     setLoading(true)
-    const [p, t, s] = await Promise.all([
+    const [p, t, s, r] = await Promise.all([
       supabaseClient.from('Todo_Project').select('*').order('created_at'),
       supabaseClient.from('Todo_Task').select('*').order('position', { ascending: true, nullsFirst: false }).order('created_at'),
       supabaseClient.from('Todo_Subtask').select('*').order('created_at'),
+      supabaseClient.from('Todo_RecurringRule').select('*').order('created_at'),
     ])
-    if (p.error || t.error || s.error) {
-      setError((p.error || t.error || s.error).message)
+    if (p.error || t.error || s.error || r.error) {
+      setError((p.error || t.error || s.error || r.error).message)
     } else {
       setProjects(p.data)
       setTasks(t.data)
       setSubtasks(s.data)
+      setRecurringRules(r.data)
       setError(null)
     }
     setLoading(false)
+  }
+
+  // --- recurring task generation ---
+  function addDays(date, n) {
+    const d = new Date(date)
+    d.setDate(d.getDate() + n)
+    return d
+  }
+
+  function formatDate(date) {
+    return date.toISOString().slice(0, 10)
+  }
+
+  function matchesRule(rule, date) {
+    if (rule.frequency === 'daily') return true
+    if (rule.frequency === 'weekly') return (rule.days_of_week || []).includes(date.getDay())
+    if (rule.frequency === 'monthly') return date.getDate() === rule.day_of_month
+    return false
+  }
+
+  function occurrencesToGenerate(rule, today) {
+    const startFromLast = rule.last_generated_date ? addDays(new Date(rule.last_generated_date), 1) : new Date(rule.start_date)
+    const ruleStart = new Date(rule.start_date)
+    const backfillCap = addDays(today, -30) // never backfill more than 30 days
+    let cursor = startFromLast > ruleStart ? startFromLast : ruleStart
+    if (cursor < backfillCap) cursor = backfillCap
+    const results = []
+    let d = cursor
+    while (d <= today) {
+      if (matchesRule(rule, d)) results.push(formatDate(d))
+      d = addDays(d, 1)
+    }
+    return results
+  }
+
+  async function generateDueTasks() {
+    const { data: rules, error } = await supabaseClient.from('Todo_RecurringRule').select('*').eq('active', true)
+    if (error || !rules || rules.length === 0) return
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    for (const rule of rules) {
+      const dates = occurrencesToGenerate(rule, today)
+      if (dates.length === 0) continue
+
+      const { data: existing } = await supabaseClient
+        .from('Todo_Task')
+        .select('due_date')
+        .eq('recurrence_rule_id', rule.id)
+      const existingDates = new Set((existing || []).map(t => t.due_date))
+      const toInsert = dates
+        .filter(d => !existingDates.has(d))
+        .map(d => ({
+          project_id: rule.project_id,
+          title: rule.title,
+          due_date: d,
+          recurrence_rule_id: rule.id,
+        }))
+
+      if (toInsert.length > 0) {
+        await supabaseClient.from('Todo_Task').insert(toInsert)
+      }
+      await supabaseClient.from('Todo_RecurringRule').update({ last_generated_date: dates[dates.length - 1] }).eq('id', rule.id)
+    }
   }
 
   function tasksForProject(projectId) {
@@ -68,6 +143,12 @@ export default function App() {
     const { error } = await supabaseClient.from('Todo_Project').insert({ title: newProjectTitle.trim() })
     if (error) { setError(error.message); return }
     setNewProjectTitle('')
+    loadAll()
+  }
+
+  async function updateProject(id, fields) {
+    const { error } = await supabaseClient.from('Todo_Project').update(fields).eq('id', id)
+    if (error) { setError(error.message); return }
     loadAll()
   }
 
@@ -122,6 +203,30 @@ export default function App() {
 
   async function deleteSubtask(id) {
     await supabaseClient.from('Todo_Subtask').delete().eq('id', id)
+    loadAll()
+  }
+
+  async function updateSubtask(id, fields) {
+    const { error } = await supabaseClient.from('Todo_Subtask').update(fields).eq('id', id)
+    if (error) { setError(error.message); return }
+    loadAll()
+  }
+
+  async function addRule(fields) {
+    const { error } = await supabaseClient.from('Todo_RecurringRule').insert(fields)
+    if (error) { setError(error.message); return }
+    initialize()
+  }
+
+  async function updateRule(id, fields) {
+    const { error } = await supabaseClient.from('Todo_RecurringRule').update(fields).eq('id', id)
+    if (error) { setError(error.message); return }
+    loadAll()
+  }
+
+  async function deleteRule(id) {
+    if (!confirm('Delete this recurring rule? Tasks already created from it will stay.')) return
+    await supabaseClient.from('Todo_RecurringRule').delete().eq('id', id)
     loadAll()
   }
 
@@ -195,6 +300,20 @@ export default function App() {
         onAddSubtask={addSubtask}
         onToggleSubtask={toggleSubtaskDone}
         onDeleteSubtask={deleteSubtask}
+        onRenameSubtask={(id, title) => updateSubtask(id, { title })}
+      />
+    )
+  }
+
+  if (view === 'recurring') {
+    return (
+      <RecurringRules
+        rules={recurringRules}
+        projects={projects}
+        onBack={goHome}
+        onAddRule={addRule}
+        onUpdateRule={updateRule}
+        onDeleteRule={deleteRule}
       />
     )
   }
@@ -202,8 +321,13 @@ export default function App() {
   return (
     <div className="shell">
       <header className="stamp">
-        <h1>Nestlist</h1>
-        <p className="tagline">a place for everything nested</p>
+        <div className="stamp-row">
+          <div>
+            <h1>Nestlist</h1>
+            <p className="tagline">a place for everything nested</p>
+          </div>
+          <button className="nav-btn" onClick={() => setView('recurring')}>↻ Recurring</button>
+        </div>
       </header>
 
       {error && <div className="error">{error}</div>}
@@ -222,7 +346,11 @@ export default function App() {
               <div className="row row-project" onClick={() => toggleProject(project.id)}>
                 <span className="proj-dot" />
                 <span className={`chevron ${isOpen ? 'open' : ''}`}>▸</span>
-                <span className="title project-title">{project.title}</span>
+                <EditableText
+                  value={project.title}
+                  onSave={(v) => updateProject(project.id, { title: v })}
+                  className="title project-title"
+                />
                 <div className="row-actions">
                   <button className="icon-btn add" title="Add task" onClick={(e) => { e.stopPropagation(); setAddingTaskFor(project.id); setDraftTitle(''); if (!isOpen) toggleProject(project.id) }}>＋</button>
                   <button className="icon-btn danger" title="Delete project" onClick={(e) => { e.stopPropagation(); deleteProject(project.id) }}>×</button>
@@ -251,7 +379,12 @@ export default function App() {
                           <input type="checkbox" checked={task.completed} onChange={() => toggleTaskDone(task)} />
                         </label>
                         {task.priority > 0 && <span className="priority-dot" style={{ background: priorityMeta.color }} />}
-                        <span className={`title leader ${task.completed ? 'done' : ''}`}>{task.title}</span>
+                        <EditableText
+                          value={task.title}
+                          onSave={(v) => updateTask(task.id, { title: v })}
+                          className={`title leader ${task.completed ? 'done' : ''}`}
+                        />
+                        {task.recurrence_rule_id && <span className="recur-badge" title="Generated from a recurring rule">↻</span>}
                       </div>
                     )
                   })}

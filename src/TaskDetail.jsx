@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { PRIORITIES } from './constants'
+import EditableText from './EditableText'
 
-export default function TaskDetail({ task, subtasks, onBack, onUpdateTask, onDeleteTask, onAddSubtask, onToggleSubtask, onDeleteSubtask }) {
+export default function TaskDetail({ task, subtasks, onBack, onUpdateTask, onDeleteTask, onAddSubtask, onToggleSubtask, onDeleteSubtask, onRenameSubtask }) {
   const [title, setTitle] = useState(task.title)
   const [newSubtask, setNewSubtask] = useState('')
 
@@ -76,7 +77,11 @@ export default function TaskDetail({ task, subtasks, onBack, onUpdateTask, onDel
               <label className="check">
                 <input type="checkbox" checked={sub.completed} onChange={() => onToggleSubtask(sub)} />
               </label>
-              <span className={`title leader ${sub.completed ? 'done' : ''}`}>{sub.title}</span>
+              <EditableText
+                value={sub.title}
+                onSave={(v) => onRenameSubtask(sub.id, v)}
+                className={`title leader ${sub.completed ? 'done' : ''}`}
+              />
               <div className="row-actions">
                 <button className="icon-btn danger" onClick={() => onDeleteSubtask(sub.id)}>×</button>
               </div>

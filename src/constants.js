@@ -4,3 +4,5 @@ export const PRIORITIES = [
   { value: 2, label: 'Medium', color: '#FFB84C' },
   { value: 3, label: 'High', color: '#FF6B6B' },
 ]
+
+export const DAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']

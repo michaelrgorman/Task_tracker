@@ -8,6 +8,9 @@
   --accent: #7C3AED;
   --done: #9CA3AF;
   --danger: #DC2626;
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 * { box-sizing: border-box; }
@@ -199,3 +202,41 @@ body {
   font-weight: 700; padding: 12px; border-radius: 10px; cursor: pointer; font-size: 0.9rem;
 }
 .delete-task-btn:hover { background: var(--danger); color: white; }
+
+.primary-btn {
+  border: none; background: var(--accent); color: white;
+  font-weight: 700; padding: 12px; border-radius: 10px; cursor: pointer; font-size: 0.9rem;
+}
+.primary-btn:hover { opacity: 0.9; }
+
+.stamp-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.nav-btn {
+  border: 1px solid var(--border); background: var(--card); color: var(--text);
+  font-weight: 600; font-size: 0.85rem; padding: 8px 14px; border-radius: 999px; cursor: pointer;
+  white-space: nowrap; flex-shrink: 0;
+}
+.nav-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.section-heading { font-size: 1.1rem; font-weight: 700; margin: 4px 0 12px; }
+
+.rule-row { justify-content: space-between; }
+.rule-info { display: flex; flex-direction: column; gap: 2px; }
+.rule-meta { font-size: 0.8rem; color: var(--text-soft); }
+
+.rule-form { margin-top: 20px; }
+
+.recur-badge { color: var(--accent); font-size: 0.85rem; flex-shrink: 0; }
+
+.editable-input {
+  flex: 1;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
+  border: none;
+  border-bottom: 1px solid var(--accent);
+  background: transparent;
+  padding: 0 0 2px;
+  outline: none;
+  min-width: 0;
+}
