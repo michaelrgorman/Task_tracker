@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabaseClient } from './supabaseClient'
+import TaskDetail from './TaskDetail'
+import { PRIORITIES } from './constants'
 
 function useToggleSet() {
   const [set, setSet] = useState(new Set())
@@ -22,11 +24,15 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [openProjects, toggleProject] = useToggleSet()
-  const [openTasks, toggleTask] = useToggleSet()
   const [newProjectTitle, setNewProjectTitle] = useState('')
   const [addingTaskFor, setAddingTaskFor] = useState(null)
-  const [addingSubtaskFor, setAddingSubtaskFor] = useState(null)
   const [draftTitle, setDraftTitle] = useState('')
+
+  const [view, setView] = useState('home') // 'home' | 'detail'
+  const [selectedTaskId, setSelectedTaskId] = useState(null)
+
+  const rowRefs = useRef(new Map())
+  const [dragInfo, setDragInfo] = useState(null) // { projectId, order: [taskId...], draggingId }
 
   useEffect(() => { loadAll() }, [])
 
@@ -34,7 +40,7 @@ export default function App() {
     setLoading(true)
     const [p, t, s] = await Promise.all([
       supabaseClient.from('Todo_Project').select('*').order('created_at'),
-      supabaseClient.from('Todo_Task').select('*').order('created_at'),
+      supabaseClient.from('Todo_Task').select('*').order('position', { ascending: true, nullsFirst: false }).order('created_at'),
       supabaseClient.from('Todo_Subtask').select('*').order('created_at'),
     ])
     if (p.error || t.error || s.error) {
@@ -48,6 +54,14 @@ export default function App() {
     setLoading(false)
   }
 
+  function tasksForProject(projectId) {
+    const base = tasks.filter(t => t.project_id === projectId)
+    if (dragInfo && dragInfo.projectId === projectId) {
+      return dragInfo.order.map(id => base.find(t => t.id === id)).filter(Boolean)
+    }
+    return base
+  }
+
   async function addProject(e) {
     e.preventDefault()
     if (!newProjectTitle.trim()) return
@@ -59,19 +73,27 @@ export default function App() {
 
   async function addTask(projectId) {
     if (!draftTitle.trim()) return
-    const { error } = await supabaseClient.from('Todo_Task').insert({ project_id: projectId, title: draftTitle.trim() })
+    const existingCount = tasks.filter(t => t.project_id === projectId).length
+    const { error } = await supabaseClient.from('Todo_Task').insert({
+      project_id: projectId,
+      title: draftTitle.trim(),
+      position: existingCount,
+    })
     if (error) { setError(error.message); return }
     setDraftTitle('')
     setAddingTaskFor(null)
     loadAll()
   }
 
-  async function addSubtask(taskId) {
-    if (!draftTitle.trim()) return
-    const { error } = await supabaseClient.from('Todo_Subtask').insert({ task_id: taskId, title: draftTitle.trim() })
+  async function addSubtask(taskId, title) {
+    const { error } = await supabaseClient.from('Todo_Subtask').insert({ task_id: taskId, title })
     if (error) { setError(error.message); return }
-    setDraftTitle('')
-    setAddingSubtaskFor(null)
+    loadAll()
+  }
+
+  async function updateTask(id, fields) {
+    const { error } = await supabaseClient.from('Todo_Task').update(fields).eq('id', id)
+    if (error) { setError(error.message); return }
     loadAll()
   }
 
@@ -91,9 +113,10 @@ export default function App() {
     loadAll()
   }
 
-  async function deleteTask(id) {
+  async function deleteTaskAndReturn(id) {
     if (!confirm('Delete this task and its subtasks?')) return
     await supabaseClient.from('Todo_Task').delete().eq('id', id)
+    setView('home')
     loadAll()
   }
 
@@ -102,7 +125,79 @@ export default function App() {
     loadAll()
   }
 
+  function openTaskDetail(taskId) {
+    setSelectedTaskId(taskId)
+    setView('detail')
+  }
+
+  function goHome() {
+    setView('home')
+    setSelectedTaskId(null)
+  }
+
+  // --- drag to reorder tasks within a project ---
+  function startDrag(e, projectId, taskId) {
+    e.stopPropagation()
+    e.target.setPointerCapture(e.pointerId)
+    const order = tasks.filter(t => t.project_id === projectId).map(t => t.id)
+    setDragInfo({ projectId, order, draggingId: taskId })
+  }
+
+  function onDragMove(e) {
+    if (!dragInfo) return
+    e.preventDefault()
+    const { order, draggingId } = dragInfo
+    const y = e.clientY
+    let newIndex = order.length - 1
+    for (let i = 0; i < order.length; i++) {
+      const id = order[i]
+      if (id === draggingId) continue
+      const el = rowRefs.current.get(id)
+      if (!el) continue
+      const rect = el.getBoundingClientRect()
+      const mid = rect.top + rect.height / 2
+      if (y < mid) { newIndex = i; break }
+    }
+    const currentIndex = order.indexOf(draggingId)
+    if (newIndex !== currentIndex) {
+      const next = order.filter(id => id !== draggingId)
+      next.splice(newIndex, 0, draggingId)
+      setDragInfo({ ...dragInfo, order: next })
+    }
+  }
+
+  async function endDrag() {
+    if (!dragInfo) return
+    const { order } = dragInfo
+    setDragInfo(null)
+    await Promise.all(order.map((id, idx) =>
+      supabaseClient.from('Todo_Task').update({ position: idx }).eq('id', id)
+    ))
+    loadAll()
+  }
+
   if (loading) return <div className="shell"><p className="muted">Loading…</p></div>
+
+  if (view === 'detail') {
+    const selectedTask = tasks.find(t => t.id === selectedTaskId)
+    if (!selectedTask) {
+      goHome()
+      return null
+    }
+    const selectedSubtasks = subtasks.filter(s => s.task_id === selectedTaskId)
+    return (
+      <TaskDetail
+        task={selectedTask}
+        subtasks={selectedSubtasks}
+        onBack={goHome}
+        onUpdateTask={updateTask}
+        onDeleteTask={deleteTaskAndReturn}
+        onAddSubtask={addSubtask}
+        onToggleSubtask={toggleSubtaskDone}
+        onDeleteSubtask={deleteSubtask}
+      />
+    )
+  }
 
   return (
     <div className="shell">
@@ -119,7 +214,7 @@ export default function App() {
         )}
 
         {projects.map((project, projectIndex) => {
-          const projectTasks = tasks.filter(t => t.project_id === project.id)
+          const projectTasks = tasksForProject(project.id)
           const isOpen = openProjects.has(project.id)
           const color = PALETTE[projectIndex % PALETTE.length]
           return (
@@ -137,45 +232,26 @@ export default function App() {
               {isOpen && (
                 <div className="indent">
                   {projectTasks.map(task => {
-                    const taskSubtasks = subtasks.filter(s => s.task_id === task.id)
-                    const taskOpen = openTasks.has(task.id)
+                    const priorityMeta = PRIORITIES[task.priority] || PRIORITIES[0]
                     return (
-                      <div className="row-group" key={task.id}>
-                        <div className="row row-task" onClick={() => toggleTask(task.id)}>
-                          <label className="check" onClick={(e) => e.stopPropagation()}>
-                            <input type="checkbox" checked={task.completed} onChange={() => toggleTaskDone(task)} />
-                          </label>
-                          <span className={`chevron ${taskOpen ? 'open' : ''}`}>▸</span>
-                          <span className={`title leader ${task.completed ? 'done' : ''}`}>{task.title}</span>
-                          <div className="row-actions">
-                            <button className="icon-btn add" title="Add subtask" onClick={(e) => { e.stopPropagation(); setAddingSubtaskFor(task.id); setDraftTitle(''); if (!taskOpen) toggleTask(task.id) }}>＋</button>
-                            <button className="icon-btn danger" title="Delete task" onClick={(e) => { e.stopPropagation(); deleteTask(task.id) }}>×</button>
-                          </div>
-                        </div>
-
-                        {taskOpen && (
-                          <div className="indent">
-                            {taskSubtasks.map(sub => (
-                              <div className="row row-subtask" key={sub.id}>
-                                <label className="check">
-                                  <input type="checkbox" checked={sub.completed} onChange={() => toggleSubtaskDone(sub)} />
-                                </label>
-                                <span className={`title leader ${sub.completed ? 'done' : ''}`}>{sub.title}</span>
-                                <div className="row-actions">
-                                  <button className="icon-btn danger" title="Delete subtask" onClick={() => deleteSubtask(sub.id)}>×</button>
-                                </div>
-                              </div>
-                            ))}
-
-                            {addingSubtaskFor === task.id && (
-                              <form className="row inline-add" onSubmit={(e) => { e.preventDefault(); addSubtask(task.id) }}>
-                                <input autoFocus value={draftTitle} onChange={e => setDraftTitle(e.target.value)} placeholder="Subtask title" />
-                                <button type="submit">Add</button>
-                                <button type="button" className="ghost" onClick={() => setAddingSubtaskFor(null)}>Cancel</button>
-                              </form>
-                            )}
-                          </div>
-                        )}
+                      <div
+                        className={`row row-task ${dragInfo?.draggingId === task.id ? 'dragging' : ''}`}
+                        key={task.id}
+                        ref={(el) => { if (el) rowRefs.current.set(task.id, el); else rowRefs.current.delete(task.id) }}
+                        onClick={() => openTaskDetail(task.id)}
+                      >
+                        <span
+                          className="drag-handle"
+                          onPointerDown={(e) => startDrag(e, project.id, task.id)}
+                          onPointerMove={onDragMove}
+                          onPointerUp={endDrag}
+                          onClick={(e) => e.stopPropagation()}
+                        >⋮⋮</span>
+                        <label className="check" onClick={(e) => e.stopPropagation()}>
+                          <input type="checkbox" checked={task.completed} onChange={() => toggleTaskDone(task)} />
+                        </label>
+                        {task.priority > 0 && <span className="priority-dot" style={{ background: priorityMeta.color }} />}
+                        <span className={`title leader ${task.completed ? 'done' : ''}`}>{task.title}</span>
                       </div>
                     )
                   })}

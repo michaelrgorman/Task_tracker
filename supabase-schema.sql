@@ -9,6 +9,10 @@ create table if not exists "Todo_Task" (
   project_id uuid not null references "Todo_Project"(id) on delete cascade,
   title text not null,
   completed boolean not null default false,
+  priority integer not null default 0,
+  due_date date,
+  recurrence_rule text,
+  position integer,
   created_at timestamptz not null default now()
 );
 
