@@ -145,7 +145,7 @@ export default function App() {
                             <input type="checkbox" checked={task.completed} onChange={() => toggleTaskDone(task)} />
                           </label>
                           <span className={`title leader ${task.completed ? 'done' : ''}`}>{task.title}</span>
-                          <button className="ghost" onClick={() => { setAddingSubtaskFor(task.id); setDraftTitle('') }}>+ sub</button>
+                          <button className="ghost" onClick={() => { setAddingSubtaskFor(task.id); setDraftTitle(''); if (!openTasks.has(task.id)) toggleTask(task.id) }}>+ sub</button>
                           <button className="ghost danger" onClick={() => deleteTask(task.id)}>delete</button>
                         </div>
 
