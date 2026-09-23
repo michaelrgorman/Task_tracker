@@ -124,15 +124,13 @@ export default function App() {
           const color = PALETTE[projectIndex % PALETTE.length]
           return (
             <div className="row-group" key={project.id} style={{ '--proj-color': color }}>
-              <div className="row row-project">
+              <div className="row row-project" onClick={() => toggleProject(project.id)}>
                 <span className="proj-dot" />
-                <button className="disclosure" onClick={() => toggleProject(project.id)}>
-                  {isOpen ? '▾' : '▸'}
-                </button>
+                <span className={`chevron ${isOpen ? 'open' : ''}`}>▸</span>
                 <span className="title project-title">{project.title}</span>
                 <div className="row-actions">
-                  <button className="icon-btn" title="Add task" onClick={() => { setAddingTaskFor(project.id); setDraftTitle(''); if (!openProjects.has(project.id)) toggleProject(project.id) }}>＋</button>
-                  <button className="icon-btn danger" title="Delete project" onClick={() => deleteProject(project.id)}>×</button>
+                  <button className="icon-btn add" title="Add task" onClick={(e) => { e.stopPropagation(); setAddingTaskFor(project.id); setDraftTitle(''); if (!isOpen) toggleProject(project.id) }}>＋</button>
+                  <button className="icon-btn danger" title="Delete project" onClick={(e) => { e.stopPropagation(); deleteProject(project.id) }}>×</button>
                 </div>
               </div>
 
@@ -143,17 +141,15 @@ export default function App() {
                     const taskOpen = openTasks.has(task.id)
                     return (
                       <div className="row-group" key={task.id}>
-                        <div className="row row-task">
-                          <label className="check">
+                        <div className="row row-task" onClick={() => toggleTask(task.id)}>
+                          <label className="check" onClick={(e) => e.stopPropagation()}>
                             <input type="checkbox" checked={task.completed} onChange={() => toggleTaskDone(task)} />
                           </label>
-                          <button className="disclosure" onClick={() => toggleTask(task.id)}>
-                            {taskOpen ? '▾' : '▸'}
-                          </button>
+                          <span className={`chevron ${taskOpen ? 'open' : ''}`}>▸</span>
                           <span className={`title leader ${task.completed ? 'done' : ''}`}>{task.title}</span>
                           <div className="row-actions">
-                            <button className="icon-btn" title="Add subtask" onClick={() => { setAddingSubtaskFor(task.id); setDraftTitle(''); if (!openTasks.has(task.id)) toggleTask(task.id) }}>＋</button>
-                            <button className="icon-btn danger" title="Delete task" onClick={() => deleteTask(task.id)}>×</button>
+                            <button className="icon-btn add" title="Add subtask" onClick={(e) => { e.stopPropagation(); setAddingSubtaskFor(task.id); setDraftTitle(''); if (!taskOpen) toggleTask(task.id) }}>＋</button>
+                            <button className="icon-btn danger" title="Delete task" onClick={(e) => { e.stopPropagation(); deleteTask(task.id) }}>×</button>
                           </div>
                         </div>
 
