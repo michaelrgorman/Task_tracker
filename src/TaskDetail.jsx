@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { PRIORITIES } from './constants'
 import EditableText from './EditableText'
 
-export default function TaskDetail({ task, subtasks, onBack, onUpdateTask, onDeleteTask, onAddSubtask, onToggleSubtask, onDeleteSubtask, onRenameSubtask }) {
+export default function TaskDetail({ task, subtasks, onBack, onUpdateTask, onDeleteTask, onAddSubtask, onToggleSubtask, onDeleteSubtask, onRenameSubtask, onDuplicateTask }) {
   const [title, setTitle] = useState(task.title)
   const [newSubtask, setNewSubtask] = useState('')
 
@@ -97,7 +97,10 @@ export default function TaskDetail({ task, subtasks, onBack, onUpdateTask, onDel
           </form>
         </div>
 
-        <button className="delete-task-btn" onClick={() => onDeleteTask(task.id)}>Delete task</button>
+        <div className="detail-actions-row">
+          <button className="nav-btn" onClick={onDuplicateTask}>⎘ Duplicate task</button>
+          <button className="delete-task-btn" onClick={() => onDeleteTask(task.id)}>Delete task</button>
+        </div>
       </div>
     </div>
   )

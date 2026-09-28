@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { supabaseClient } from './supabaseClient'
 import TaskDetail from './TaskDetail'
 import RecurringRules from './RecurringRules'
+import Notes from './Notes'
 import EditableText from './EditableText'
 import { PRIORITIES } from './constants'
 
@@ -14,7 +15,7 @@ function useToggleSet() {
       return next
     })
   }
-  return [set, toggle]
+  return [set, toggle, setSet]
 }
 
 const PALETTE = ['#FF6B6B', '#4ECDC4', '#FFB84C', '#A78BFA', '#FF8FAB', '#4D96FF', '#6BCB77', '#F76E11']
@@ -24,9 +25,10 @@ export default function App() {
   const [tasks, setTasks] = useState([])
   const [subtasks, setSubtasks] = useState([])
   const [recurringRules, setRecurringRules] = useState([])
+  const [notes, setNotes] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [openProjects, toggleProject] = useToggleSet()
+  const [openProjects, toggleProject, setOpenProjects] = useToggleSet()
   const [newProjectTitle, setNewProjectTitle] = useState('')
   const [addingTaskFor, setAddingTaskFor] = useState(null)
   const [draftTitle, setDraftTitle] = useState('')
@@ -34,6 +36,15 @@ export default function App() {
   const [view, setView] = useState('home') // 'home' | 'detail' | 'recurring'
   const [selectedTaskId, setSelectedTaskId] = useState(null)
   const [hideCompleted, setHideCompleted] = useState(false)
+  const [workspaceFilter, setWorkspaceFilter] = useState('all') // 'all' | 'work' | 'personal'
+  const [darkMode, setDarkMode] = useState(() => {
+    try { return localStorage.getItem('nestlist-dark') === 'true' } catch { return false }
+  })
+
+  useEffect(() => {
+    document.body.classList.toggle('dark', darkMode)
+    try { localStorage.setItem('nestlist-dark', darkMode ? 'true' : 'false') } catch { /* ignore */ }
+  }, [darkMode])
 
   const rowRefs = useRef(new Map())
   const [dragInfo, setDragInfo] = useState(null) // { projectId, order: [taskId...], draggingId }
@@ -48,19 +59,21 @@ export default function App() {
 
   async function loadAll() {
     setLoading(true)
-    const [p, t, s, r] = await Promise.all([
+    const [p, t, s, r, n] = await Promise.all([
       supabaseClient.from('Todo_Project').select('*').order('created_at'),
       supabaseClient.from('Todo_Task').select('*').order('position', { ascending: true, nullsFirst: false }).order('created_at'),
       supabaseClient.from('Todo_Subtask').select('*').order('created_at'),
       supabaseClient.from('Todo_RecurringRule').select('*').order('created_at'),
+      supabaseClient.from('Todo_Note').select('*').order('updated_at', { ascending: false }),
     ])
-    if (p.error || t.error || s.error || r.error) {
-      setError((p.error || t.error || s.error || r.error).message)
+    if (p.error || t.error || s.error || r.error || n.error) {
+      setError((p.error || t.error || s.error || r.error || n.error).message)
     } else {
       setProjects(p.data)
       setTasks(t.data)
       setSubtasks(s.data)
       setRecurringRules(r.data)
+      setNotes(n.data)
       setError(null)
     }
     setLoading(false)
@@ -128,6 +141,22 @@ export default function App() {
       }
       await supabaseClient.from('Todo_RecurringRule').update({ last_generated_date: dates[dates.length - 1] }).eq('id', rule.id)
     }
+  }
+
+  function workspaceIcon(ws) {
+    if (ws === 'work') return '💼'
+    if (ws === 'personal') return '🏠'
+    return '⬦'
+  }
+
+  function nextWorkspace(ws) {
+    if (ws === 'work') return 'personal'
+    if (ws === 'personal') return null
+    return 'work'
+  }
+
+  function cycleWorkspaceFilter() {
+    setWorkspaceFilter(f => (f === 'all' ? 'work' : f === 'work' ? 'personal' : 'all'))
   }
 
   function tasksForProject(projectId) {
@@ -213,6 +242,29 @@ export default function App() {
     loadAll()
   }
 
+  async function duplicateTask(task) {
+    const { data: newTask, error } = await supabaseClient
+      .from('Todo_Task')
+      .insert({
+        project_id: task.project_id,
+        title: `${task.title} (copy)`,
+        priority: task.priority,
+        completed: false,
+      })
+      .select()
+      .single()
+    if (error) { setError(error.message); return }
+
+    const relatedSubtasks = subtasks.filter(s => s.task_id === task.id)
+    if (relatedSubtasks.length > 0) {
+      await supabaseClient.from('Todo_Subtask').insert(
+        relatedSubtasks.map(s => ({ task_id: newTask.id, title: s.title, completed: false }))
+      )
+    }
+    await loadAll()
+    setSelectedTaskId(newTask.id)
+  }
+
   async function addRule(fields) {
     const { error } = await supabaseClient.from('Todo_RecurringRule').insert(fields)
     if (error) { setError(error.message); return }
@@ -231,6 +283,41 @@ export default function App() {
     loadAll()
   }
 
+  async function createNote(fields) {
+    const { data, error } = await supabaseClient
+      .from('Todo_Note')
+      .insert({ ...fields, updated_at: new Date().toISOString() })
+      .select()
+      .single()
+    if (error) { setError(error.message); return null }
+    await loadAll()
+    return data
+  }
+
+  async function updateNote(id, fields) {
+    const { error } = await supabaseClient
+      .from('Todo_Note')
+      .update({ ...fields, updated_at: new Date().toISOString() })
+      .eq('id', id)
+    if (error) { setError(error.message); return }
+    loadAll()
+  }
+
+  async function deleteNote(id) {
+    if (!confirm('Delete this note?')) return
+    await supabaseClient.from('Todo_Note').delete().eq('id', id)
+    loadAll()
+  }
+
+  async function duplicateNote(note) {
+    return createNote({
+      title: `${note.title} (copy)`,
+      content: note.content || '',
+      folder: note.folder || null,
+      tags: note.tags || [],
+    })
+  }
+
   function openTaskDetail(taskId) {
     setSelectedTaskId(taskId)
     setView('detail')
@@ -239,6 +326,14 @@ export default function App() {
   function goHome() {
     setView('home')
     setSelectedTaskId(null)
+  }
+
+  function toggleExpandAll() {
+    if (openProjects.size >= projects.length && projects.length > 0) {
+      setOpenProjects(new Set())
+    } else {
+      setOpenProjects(new Set(projects.map(p => p.id)))
+    }
   }
 
   // --- drag to reorder tasks within a project ---
@@ -302,6 +397,7 @@ export default function App() {
         onToggleSubtask={toggleSubtaskDone}
         onDeleteSubtask={deleteSubtask}
         onRenameSubtask={(id, title) => updateSubtask(id, { title })}
+        onDuplicateTask={() => duplicateTask(selectedTask)}
       />
     )
   }
@@ -319,6 +415,19 @@ export default function App() {
     )
   }
 
+  if (view === 'notes') {
+    return (
+      <Notes
+        notes={notes}
+        onBack={goHome}
+        onCreateNote={createNote}
+        onUpdateNote={updateNote}
+        onDeleteNote={deleteNote}
+        onDuplicateNote={duplicateNote}
+      />
+    )
+  }
+
   return (
     <div className="shell">
       <header className="stamp">
@@ -328,6 +437,16 @@ export default function App() {
             <p className="tagline">a place for everything nested</p>
           </div>
           <div className="nav-actions">
+            <button className="nav-btn" onClick={() => setDarkMode(d => !d)}>
+              {darkMode ? '☀️ Light' : '🌙 Dark'}
+            </button>
+            <button className="nav-btn" onClick={() => setView('notes')}>📝 Notes</button>
+            <button className="nav-btn" onClick={toggleExpandAll}>
+              {openProjects.size >= projects.length && projects.length > 0 ? '⊟ Collapse all' : '⊞ Expand all'}
+            </button>
+            <button className="nav-btn" onClick={cycleWorkspaceFilter}>
+              {workspaceFilter === 'all' ? '🌐 All' : workspaceFilter === 'work' ? '💼 Work' : '🏠 Personal'}
+            </button>
             <button className="nav-btn" onClick={() => setHideCompleted(h => !h)}>
               {hideCompleted ? '☑ Show completed' : '☐ Hide completed'}
             </button>
@@ -343,70 +462,95 @@ export default function App() {
           <p className="empty">No projects yet — start one below.</p>
         )}
 
-        {projects.map((project, projectIndex) => {
-          const projectTasks = tasksForProject(project.id)
-          const isOpen = openProjects.has(project.id)
-          const color = PALETTE[projectIndex % PALETTE.length]
-          return (
-            <div className="row-group" key={project.id} style={{ '--proj-color': color }}>
-              <div className="row row-project" onClick={() => toggleProject(project.id)}>
-                <span className="proj-dot" />
-                <span className={`chevron ${isOpen ? 'open' : ''}`}>▸</span>
-                <EditableText
-                  value={project.title}
-                  onSave={(v) => updateProject(project.id, { title: v })}
-                  className="title project-title"
-                />
-                <div className="row-actions">
-                  <button className="icon-btn add" title="Add task" onClick={(e) => { e.stopPropagation(); setAddingTaskFor(project.id); setDraftTitle(''); if (!isOpen) toggleProject(project.id) }}>＋</button>
-                  <button className="icon-btn danger" title="Delete project" onClick={(e) => { e.stopPropagation(); deleteProject(project.id) }}>×</button>
+        {(() => {
+          const colorFor = (id) => {
+            const idx = projects.findIndex(p => p.id === id)
+            return PALETTE[idx % PALETTE.length]
+          }
+          const displayProjects = [...projects].sort((a, b) => {
+            if (a.completed === b.completed) return 0
+            return a.completed ? 1 : -1
+          })
+          const workspaceFiltered = workspaceFilter === 'all' ? displayProjects : displayProjects.filter(p => p.workspace === workspaceFilter)
+          const visibleProjects = hideCompleted ? workspaceFiltered.filter(p => !p.completed) : workspaceFiltered
+          return visibleProjects.map((project) => {
+            const projectTasks = tasksForProject(project.id)
+            const isOpen = openProjects.has(project.id)
+            const color = colorFor(project.id)
+            return (
+              <div className="row-group" key={project.id} style={{ '--proj-color': color }}>
+                <div className="row row-project" onClick={() => toggleProject(project.id)}>
+                  <label className="check" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={project.completed}
+                      onChange={() => updateProject(project.id, { completed: !project.completed })}
+                    />
+                  </label>
+                  <span className="proj-dot" />
+                  <button
+                    type="button"
+                    className={`workspace-badge ${project.workspace ? 'set' : ''}`}
+                    title={project.workspace ? `Workspace: ${project.workspace}` : 'Set workspace (tap to cycle)'}
+                    onClick={(e) => { e.stopPropagation(); updateProject(project.id, { workspace: nextWorkspace(project.workspace) }) }}
+                  >{workspaceIcon(project.workspace)}</button>
+                  <span className={`chevron ${isOpen ? 'open' : ''}`}>▸</span>
+                  <EditableText
+                    value={project.title}
+                    onSave={(v) => updateProject(project.id, { title: v })}
+                    className={`title project-title ${project.completed ? 'done' : ''}`}
+                  />
+                  <div className="row-actions">
+                    <button className="icon-btn add" title="Add task" onClick={(e) => { e.stopPropagation(); setAddingTaskFor(project.id); setDraftTitle(''); if (!isOpen) toggleProject(project.id) }}>＋</button>
+                    <button className="icon-btn danger" title="Delete project" onClick={(e) => { e.stopPropagation(); deleteProject(project.id) }}>×</button>
+                  </div>
                 </div>
+
+                {isOpen && (
+                  <div className="indent">
+                    {projectTasks.map(task => {
+                      const priorityMeta = PRIORITIES[task.priority] || PRIORITIES[0]
+                      return (
+                        <div
+                          className={`row row-task ${dragInfo?.draggingId === task.id ? 'dragging' : ''}`}
+                          key={task.id}
+                          ref={(el) => { if (el) rowRefs.current.set(task.id, el); else rowRefs.current.delete(task.id) }}
+                          onClick={() => openTaskDetail(task.id)}
+                        >
+                          <span
+                            className="drag-handle"
+                            onPointerDown={(e) => startDrag(e, project.id, task.id)}
+                            onPointerMove={onDragMove}
+                            onPointerUp={endDrag}
+                            onClick={(e) => e.stopPropagation()}
+                          >⋮⋮</span>
+                          <label className="check" onClick={(e) => e.stopPropagation()}>
+                            <input type="checkbox" checked={task.completed} onChange={() => toggleTaskDone(task)} />
+                          </label>
+                          {task.priority > 0 && <span className="priority-dot" style={{ background: priorityMeta.color }} />}
+                          <EditableText
+                            value={task.title}
+                            onSave={(v) => updateTask(task.id, { title: v })}
+                            className={`title leader ${task.completed ? 'done' : ''}`}
+                          />
+                          {task.recurrence_rule_id && <span className="recur-badge" title="Generated from a recurring rule">↻</span>}
+                        </div>
+                      )
+                    })}
+
+                    {addingTaskFor === project.id && (
+                      <form className="row inline-add" onSubmit={(e) => { e.preventDefault(); addTask(project.id) }}>
+                        <input autoFocus value={draftTitle} onChange={e => setDraftTitle(e.target.value)} placeholder="Task title" />
+                        <button type="submit">Add</button>
+                        <button type="button" className="ghost" onClick={() => setAddingTaskFor(null)}>Cancel</button>
+                      </form>
+                    )}
+                  </div>
+                )}
               </div>
-
-              {isOpen && (
-                <div className="indent">
-                  {projectTasks.map(task => {
-                    const priorityMeta = PRIORITIES[task.priority] || PRIORITIES[0]
-                    return (
-                      <div
-                        className={`row row-task ${dragInfo?.draggingId === task.id ? 'dragging' : ''}`}
-                        key={task.id}
-                        ref={(el) => { if (el) rowRefs.current.set(task.id, el); else rowRefs.current.delete(task.id) }}
-                        onClick={() => openTaskDetail(task.id)}
-                      >
-                        <span
-                          className="drag-handle"
-                          onPointerDown={(e) => startDrag(e, project.id, task.id)}
-                          onPointerMove={onDragMove}
-                          onPointerUp={endDrag}
-                          onClick={(e) => e.stopPropagation()}
-                        >⋮⋮</span>
-                        <label className="check" onClick={(e) => e.stopPropagation()}>
-                          <input type="checkbox" checked={task.completed} onChange={() => toggleTaskDone(task)} />
-                        </label>
-                        {task.priority > 0 && <span className="priority-dot" style={{ background: priorityMeta.color }} />}
-                        <EditableText
-                          value={task.title}
-                          onSave={(v) => updateTask(task.id, { title: v })}
-                          className={`title leader ${task.completed ? 'done' : ''}`}
-                        />
-                        {task.recurrence_rule_id && <span className="recur-badge" title="Generated from a recurring rule">↻</span>}
-                      </div>
-                    )
-                  })}
-
-                  {addingTaskFor === project.id && (
-                    <form className="row inline-add" onSubmit={(e) => { e.preventDefault(); addTask(project.id) }}>
-                      <input autoFocus value={draftTitle} onChange={e => setDraftTitle(e.target.value)} placeholder="Task title" />
-                      <button type="submit">Add</button>
-                      <button type="button" className="ghost" onClick={() => setAddingTaskFor(null)}>Cancel</button>
-                    </form>
-                  )}
-                </div>
-              )}
-            </div>
-          )
-        })}
+            )
+          })
+        })()}
       </div>
 
       <form className="new-project" onSubmit={addProject}>
