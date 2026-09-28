@@ -185,7 +185,7 @@ body {
   flex-shrink: 0;
   user-select: none;
 }
-.row-task.dragging { opacity: 0.5; }
+.row-task.dragging, .row-project.dragging { opacity: 0.5; }
 
 .priority-dot {
   width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
@@ -263,20 +263,6 @@ body {
 .rule-form { margin-top: 20px; }
 
 .recur-badge { color: var(--accent); font-size: 0.85rem; flex-shrink: 0; }
-
-.workspace-badge {
-  background: none;
-  border: none;
-  font-size: 0.85rem;
-  cursor: pointer;
-  padding: 2px 4px;
-  border-radius: 6px;
-  opacity: 0.3;
-  flex-shrink: 0;
-  transition: opacity 0.15s ease, background 0.15s ease;
-}
-.workspace-badge.set { opacity: 1; }
-.workspace-badge:hover { opacity: 1; background: var(--bg-b); }
 
 .editable-input {
   flex: 1;

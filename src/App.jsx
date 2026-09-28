@@ -14,7 +14,7 @@ function useToggleSet() {
       return next
     })
   }
-  return [set, toggle, setSet]
+  return [set, toggle]
 }
 
 const PALETTE = ['#FF6B6B', '#4ECDC4', '#FFB84C', '#A78BFA', '#FF8FAB', '#4D96FF', '#6BCB77', '#F76E11']
@@ -26,7 +26,7 @@ export default function App() {
   const [recurringRules, setRecurringRules] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [openProjects, toggleProject, setOpenProjects] = useToggleSet()
+  const [openProjects, toggleProject] = useToggleSet()
   const [newProjectTitle, setNewProjectTitle] = useState('')
   const [addingTaskFor, setAddingTaskFor] = useState(null)
   const [draftTitle, setDraftTitle] = useState('')
@@ -34,7 +34,6 @@ export default function App() {
   const [view, setView] = useState('home') // 'home' | 'detail' | 'recurring'
   const [selectedTaskId, setSelectedTaskId] = useState(null)
   const [hideCompleted, setHideCompleted] = useState(false)
-  const [workspaceFilter, setWorkspaceFilter] = useState('all') // 'all' | 'work' | 'personal'
   const [darkMode, setDarkMode] = useState(() => {
     try { return localStorage.getItem('nestlist-dark') === 'true' } catch { return false }
   })
@@ -45,7 +44,9 @@ export default function App() {
   }, [darkMode])
 
   const rowRefs = useRef(new Map())
-  const [dragInfo, setDragInfo] = useState(null) // { projectId, order: [taskId...], draggingId }
+  const [dragInfo, setDragInfo] = useState(null) // tasks: { projectId, order: [taskId...], draggingId }
+  const projectRefs = useRef(new Map())
+  const [projectDrag, setProjectDrag] = useState(null) // projects: { order: [projectId...], draggingId }
 
   useEffect(() => { initialize() }, [])
 
@@ -58,7 +59,7 @@ export default function App() {
   async function loadAll() {
     setLoading(true)
     const [p, t, s, r] = await Promise.all([
-      supabaseClient.from('Todo_Project').select('*').order('created_at'),
+      supabaseClient.from('Todo_Project').select('*').order('position', { ascending: true, nullsFirst: false }).order('created_at'),
       supabaseClient.from('Todo_Task').select('*').order('position', { ascending: true, nullsFirst: false }).order('created_at'),
       supabaseClient.from('Todo_Subtask').select('*').order('created_at'),
       supabaseClient.from('Todo_RecurringRule').select('*').order('created_at'),
@@ -139,24 +140,15 @@ export default function App() {
     }
   }
 
-  function workspaceIcon(ws) {
-    if (ws === 'work') return '💼'
-    if (ws === 'personal') return '🏠'
-    return '⬦'
-  }
-
-  function nextWorkspace(ws) {
-    if (ws === 'work') return 'personal'
-    if (ws === 'personal') return null
-    return 'work'
-  }
-
-  function cycleWorkspaceFilter() {
-    setWorkspaceFilter(f => (f === 'all' ? 'work' : f === 'work' ? 'personal' : 'all'))
+  function byPosition(a, b) {
+    const pa = a.position ?? 1e9
+    const pb = b.position ?? 1e9
+    if (pa !== pb) return pa - pb
+    return new Date(a.created_at) - new Date(b.created_at)
   }
 
   function tasksForProject(projectId) {
-    const base = tasks.filter(t => t.project_id === projectId)
+    const base = tasks.filter(t => t.project_id === projectId).sort(byPosition)
     const ordered = (dragInfo && dragInfo.projectId === projectId)
       ? dragInfo.order.map(id => base.find(t => t.id === id)).filter(Boolean)
       : base
@@ -166,7 +158,7 @@ export default function App() {
   async function addProject(e) {
     e.preventDefault()
     if (!newProjectTitle.trim()) return
-    const { error } = await supabaseClient.from('Todo_Project').insert({ title: newProjectTitle.trim() })
+    const { error } = await supabaseClient.from('Todo_Project').insert({ title: newProjectTitle.trim(), position: projects.length })
     if (error) { setError(error.message); return }
     setNewProjectTitle('')
     loadAll()
@@ -289,52 +281,84 @@ export default function App() {
     setSelectedTaskId(null)
   }
 
-  function toggleExpandAll() {
-    if (openProjects.size >= projects.length && projects.length > 0) {
-      setOpenProjects(new Set())
-    } else {
-      setOpenProjects(new Set(projects.map(p => p.id)))
+  // Insert the dragged item before the first other item whose midpoint is below the
+  // pointer. Items with no row on screen (e.g. hidden completed ones) are skipped.
+  function reorderByPointer(order, draggingId, y, refs) {
+    let beforeId = null
+    for (const id of order) {
+      if (id === draggingId) continue
+      const el = refs.get(id)
+      if (!el) continue
+      const rect = el.getBoundingClientRect()
+      if (y < rect.top + rect.height / 2) { beforeId = id; break }
     }
+    const rest = order.filter(id => id !== draggingId)
+    const at = beforeId ? rest.indexOf(beforeId) : rest.length
+    return [...rest.slice(0, at), draggingId, ...rest.slice(at)]
   }
 
   // --- drag to reorder tasks within a project ---
   function startDrag(e, projectId, taskId) {
     e.stopPropagation()
     e.target.setPointerCapture(e.pointerId)
-    const order = tasks.filter(t => t.project_id === projectId).map(t => t.id)
+    const order = tasks.filter(t => t.project_id === projectId).sort(byPosition).map(t => t.id)
     setDragInfo({ projectId, order, draggingId: taskId })
   }
 
   function onDragMove(e) {
     if (!dragInfo) return
     e.preventDefault()
-    const { order, draggingId } = dragInfo
-    const y = e.clientY
-    let newIndex = order.length - 1
-    for (let i = 0; i < order.length; i++) {
-      const id = order[i]
-      if (id === draggingId) continue
-      const el = rowRefs.current.get(id)
-      if (!el) continue
-      const rect = el.getBoundingClientRect()
-      const mid = rect.top + rect.height / 2
-      if (y < mid) { newIndex = i; break }
-    }
-    const currentIndex = order.indexOf(draggingId)
-    if (newIndex !== currentIndex) {
-      const next = order.filter(id => id !== draggingId)
-      next.splice(newIndex, 0, draggingId)
-      setDragInfo({ ...dragInfo, order: next })
-    }
+    const next = reorderByPointer(dragInfo.order, dragInfo.draggingId, e.clientY, rowRefs.current)
+    if (next.join() !== dragInfo.order.join()) setDragInfo({ ...dragInfo, order: next })
   }
 
   async function endDrag() {
     if (!dragInfo) return
     const { order } = dragInfo
     setDragInfo(null)
-    await Promise.all(order.map((id, idx) =>
+    setTasks(prev => prev.map(t => {
+      const idx = order.indexOf(t.id)
+      return idx === -1 ? t : { ...t, position: idx }
+    }))
+    const results = await Promise.all(order.map((id, idx) =>
       supabaseClient.from('Todo_Task').update({ position: idx }).eq('id', id)
     ))
+    const failed = results.find(r => r.error)
+    if (failed) setError(failed.error.message)
+    loadAll()
+  }
+
+  // --- drag to reorder projects ---
+  function orderedProjects() {
+    if (projectDrag) return projectDrag.order.map(id => projects.find(p => p.id === id)).filter(Boolean)
+    return [...projects].sort((a, b) =>
+      a.completed === b.completed ? byPosition(a, b) : (a.completed ? 1 : -1)
+    )
+  }
+
+  function startProjectDrag(e, projectId) {
+    e.stopPropagation()
+    e.target.setPointerCapture(e.pointerId)
+    setProjectDrag({ order: orderedProjects().map(p => p.id), draggingId: projectId })
+  }
+
+  function onProjectDragMove(e) {
+    if (!projectDrag) return
+    e.preventDefault()
+    const next = reorderByPointer(projectDrag.order, projectDrag.draggingId, e.clientY, projectRefs.current)
+    if (next.join() !== projectDrag.order.join()) setProjectDrag({ ...projectDrag, order: next })
+  }
+
+  async function endProjectDrag() {
+    if (!projectDrag) return
+    const { order } = projectDrag
+    setProjectDrag(null)
+    setProjects(prev => prev.map(p => ({ ...p, position: order.indexOf(p.id) })))
+    const results = await Promise.all(order.map((id, idx) =>
+      supabaseClient.from('Todo_Project').update({ position: idx }).eq('id', id)
+    ))
+    const failed = results.find(r => r.error)
+    if (failed) setError(failed.error.message)
     loadAll()
   }
 
@@ -388,12 +412,6 @@ export default function App() {
             <button className="nav-btn" onClick={() => setDarkMode(d => !d)}>
               {darkMode ? '☀️ Light' : '🌙 Dark'}
             </button>
-            <button className="nav-btn" onClick={toggleExpandAll}>
-              {openProjects.size >= projects.length && projects.length > 0 ? '⊟ Collapse all' : '⊞ Expand all'}
-            </button>
-            <button className="nav-btn" onClick={cycleWorkspaceFilter}>
-              {workspaceFilter === 'all' ? '🌐 All' : workspaceFilter === 'work' ? '💼 Work' : '🏠 Personal'}
-            </button>
             <button className="nav-btn" onClick={() => setHideCompleted(h => !h)}>
               {hideCompleted ? '☑ Show completed' : '☐ Hide completed'}
             </button>
@@ -410,23 +428,33 @@ export default function App() {
         )}
 
         {(() => {
+          // Colour is tied to creation order, so it stays put when projects are reordered.
+          const createdOrder = [...projects].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
           const colorFor = (id) => {
-            const idx = projects.findIndex(p => p.id === id)
+            const idx = createdOrder.findIndex(p => p.id === id)
             return PALETTE[idx % PALETTE.length]
           }
-          const displayProjects = [...projects].sort((a, b) => {
-            if (a.completed === b.completed) return 0
-            return a.completed ? 1 : -1
-          })
-          const workspaceFiltered = workspaceFilter === 'all' ? displayProjects : displayProjects.filter(p => p.workspace === workspaceFilter)
-          const visibleProjects = hideCompleted ? workspaceFiltered.filter(p => !p.completed) : workspaceFiltered
+          const displayProjects = orderedProjects()
+          const visibleProjects = hideCompleted ? displayProjects.filter(p => !p.completed) : displayProjects
           return visibleProjects.map((project) => {
             const projectTasks = tasksForProject(project.id)
             const isOpen = openProjects.has(project.id)
             const color = colorFor(project.id)
             return (
               <div className="row-group" key={project.id} style={{ '--proj-color': color }}>
-                <div className="row row-project" onClick={() => toggleProject(project.id)}>
+                <div
+                  className={`row row-project ${projectDrag?.draggingId === project.id ? 'dragging' : ''}`}
+                  ref={(el) => { if (el) projectRefs.current.set(project.id, el); else projectRefs.current.delete(project.id) }}
+                  onClick={() => toggleProject(project.id)}
+                >
+                  <span
+                    className="drag-handle"
+                    title="Drag to reorder"
+                    onPointerDown={(e) => startProjectDrag(e, project.id)}
+                    onPointerMove={onProjectDragMove}
+                    onPointerUp={endProjectDrag}
+                    onClick={(e) => e.stopPropagation()}
+                  >⋮⋮</span>
                   <label className="check" onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
@@ -435,12 +463,6 @@ export default function App() {
                     />
                   </label>
                   <span className="proj-dot" />
-                  <button
-                    type="button"
-                    className={`workspace-badge ${project.workspace ? 'set' : ''}`}
-                    title={project.workspace ? `Workspace: ${project.workspace}` : 'Set workspace (tap to cycle)'}
-                    onClick={(e) => { e.stopPropagation(); updateProject(project.id, { workspace: nextWorkspace(project.workspace) }) }}
-                  >{workspaceIcon(project.workspace)}</button>
                   <span className={`chevron ${isOpen ? 'open' : ''}`}>▸</span>
                   <EditableText
                     value={project.title}
