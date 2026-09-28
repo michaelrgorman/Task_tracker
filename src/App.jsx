@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import { supabaseClient } from './supabaseClient'
 import TaskDetail from './TaskDetail'
 import RecurringRules from './RecurringRules'
-import Notes from './Notes'
 import EditableText from './EditableText'
 import { PRIORITIES } from './constants'
 
@@ -25,7 +24,6 @@ export default function App() {
   const [tasks, setTasks] = useState([])
   const [subtasks, setSubtasks] = useState([])
   const [recurringRules, setRecurringRules] = useState([])
-  const [notes, setNotes] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [openProjects, toggleProject, setOpenProjects] = useToggleSet()
@@ -59,21 +57,19 @@ export default function App() {
 
   async function loadAll() {
     setLoading(true)
-    const [p, t, s, r, n] = await Promise.all([
+    const [p, t, s, r] = await Promise.all([
       supabaseClient.from('Todo_Project').select('*').order('created_at'),
       supabaseClient.from('Todo_Task').select('*').order('position', { ascending: true, nullsFirst: false }).order('created_at'),
       supabaseClient.from('Todo_Subtask').select('*').order('created_at'),
       supabaseClient.from('Todo_RecurringRule').select('*').order('created_at'),
-      supabaseClient.from('Todo_Note').select('*').order('updated_at', { ascending: false }),
     ])
-    if (p.error || t.error || s.error || r.error || n.error) {
-      setError((p.error || t.error || s.error || r.error || n.error).message)
+    if (p.error || t.error || s.error || r.error) {
+      setError((p.error || t.error || s.error || r.error).message)
     } else {
       setProjects(p.data)
       setTasks(t.data)
       setSubtasks(s.data)
       setRecurringRules(r.data)
-      setNotes(n.data)
       setError(null)
     }
     setLoading(false)
@@ -283,41 +279,6 @@ export default function App() {
     loadAll()
   }
 
-  async function createNote(fields) {
-    const { data, error } = await supabaseClient
-      .from('Todo_Note')
-      .insert({ ...fields, updated_at: new Date().toISOString() })
-      .select()
-      .single()
-    if (error) { setError(error.message); return null }
-    await loadAll()
-    return data
-  }
-
-  async function updateNote(id, fields) {
-    const { error } = await supabaseClient
-      .from('Todo_Note')
-      .update({ ...fields, updated_at: new Date().toISOString() })
-      .eq('id', id)
-    if (error) { setError(error.message); return }
-    loadAll()
-  }
-
-  async function deleteNote(id) {
-    if (!confirm('Delete this note?')) return
-    await supabaseClient.from('Todo_Note').delete().eq('id', id)
-    loadAll()
-  }
-
-  async function duplicateNote(note) {
-    return createNote({
-      title: `${note.title} (copy)`,
-      content: note.content || '',
-      folder: note.folder || null,
-      tags: note.tags || [],
-    })
-  }
-
   function openTaskDetail(taskId) {
     setSelectedTaskId(taskId)
     setView('detail')
@@ -415,19 +376,6 @@ export default function App() {
     )
   }
 
-  if (view === 'notes') {
-    return (
-      <Notes
-        notes={notes}
-        onBack={goHome}
-        onCreateNote={createNote}
-        onUpdateNote={updateNote}
-        onDeleteNote={deleteNote}
-        onDuplicateNote={duplicateNote}
-      />
-    )
-  }
-
   return (
     <div className="shell">
       <header className="stamp">
@@ -440,7 +388,6 @@ export default function App() {
             <button className="nav-btn" onClick={() => setDarkMode(d => !d)}>
               {darkMode ? '☀️ Light' : '🌙 Dark'}
             </button>
-            <button className="nav-btn" onClick={() => setView('notes')}>📝 Notes</button>
             <button className="nav-btn" onClick={toggleExpandAll}>
               {openProjects.size >= projects.length && projects.length > 0 ? '⊟ Collapse all' : '⊞ Expand all'}
             </button>
